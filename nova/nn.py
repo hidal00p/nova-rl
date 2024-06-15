@@ -118,19 +118,51 @@ class Layer:
 
 
 class NN:
-    def __init__(
-        self,
-        arch: np.ndarray,
-    ):
+    def __init__(self, arch: np.ndarray, activations: Optional[list[Operator]] = None):
+        assert len(arch) > 1
         self.arch = arch
         self.layers: list[Layer] = [Layer(size) for size in arch]
+        self.activations = activations or [Activation.tanh] * (len(self.layers) - 1)
 
-        self.construct_layers()
+        self.__construct_layers()
 
-    def construct_layers(self):
-        for in_layer, out_layer in zip(self.layers[:-1], self.layers[1:]):
+    @property
+    def hidden_layers(self):
+        return self.layers[:-1]
+
+    @property
+    def conjugate_layers(self):
+        """
+        Layers conjugate to hidden layers.
+        """
+        return self.layers[1:]
+
+    @property
+    def input_layer(self):
+        return self.layers[0]
+
+    @property
+    def output_layer(self):
+        return self.layers[-1]
+
+    def __construct_layers(self):
+        """
+        Connects layers together, and injects weights, biases and activations into them.
+        """
+        for in_layer, out_layer, activation in zip(
+            self.hidden_layers, self.conjugate_layers, self.activations
+        ):
             input_dim, output_dim = in_layer.size, out_layer.size
             weights = np.random.rand(output_dim, input_dim)
             bias = np.random.random(output_dim)
             in_layer.connect_layer(out_layer)
-            in_layer.add_arch(weights=weights, bias=bias, activation=Activation.tanh)
+            in_layer.add_arch(weights=weights, bias=bias, activation=activation)
+
+    def forward(self, x: np.ndarray):
+        """
+        Performs a forward pass of the constructed neural network.
+        """
+        self.input_layer.fill(x)
+
+        for layer in self.hidden_layers:
+            layer.propagate()

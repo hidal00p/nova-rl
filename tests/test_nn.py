@@ -50,3 +50,15 @@ class TestNN:
 
         for layer, desired_size in zip(nn.layers, arch):
             assert layer.size == desired_size
+
+    def test_forward_pass(self):
+        arch = np.array([1, 1, 1])
+        activations = [Activation.identity, Activation.identity]
+        nn = NN(arch=arch, activations=activations)
+
+        nn.forward(np.array([1.0]))
+
+        for in_layer, out_layer in zip(nn.hidden_layers, nn.conjugate_layers):
+            a, x, b = in_layer.weights, in_layer.values, in_layer.bias
+            y = out_layer.values
+            assert y == a * x + b
