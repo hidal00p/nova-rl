@@ -1,36 +1,43 @@
 import gymnasium as gym
-import matplotlib.pyplot as plt
+import numpy as np
+
 from nova.nn import NN, Activation
 
 
 class TestLunarLander:
-    TEST_ENV = "LunarLander-v2"
 
     def test_run(self):
-        env = gym.make("LunarLander-v2")
-        trajs = []
-        for _ in range(10):
-            traj = []
-            term, trunc = False, False
-            obs, _ = env.reset(seed=42)
-            while not term or not trunc:
-                a = env.action_space.sample()
-                _obs, rew, term, trunc, _ = env.step(a)
+        test_env = "LunarLander-v2"
+        random_seed = 42
+        epochs = 5
+        max_batch = 5
+        env = gym.make(test_env)
+        actions = [
+            action for action in range(env.action_space.start, env.action_space.n)
+        ]
 
-                traj.append((obs, a, rew))
-                obs = _obs
-            trajs.append(traj)
+        observation_dim, action_dim = env.observation_space.shape[0], env.action_space.n
+        policy = NN(
+            arch=[observation_dim, 4, 6, action_dim],
+            activations=[Activation.tanh, Activation.tanh, Activation.identity],
+        )
 
-        for traj in trajs:
-            x = []
-            y = []
-            rew = 0.0
-            for step in traj:
-                obs, _, r = step
-                x.append(obs[0])
-                y.append(obs[1])
-                rew += r
+        for epoch in range(epochs):
+            obs, _ = env.reset(seed=random_seed)
+            current_batch = 0
+            while True:
+                # Execute trajectories and collect data for training
+                probs = np.exp(policy.forward(obs))
+                probs /= probs.sum()
 
-            plt.plot(x, y, label=f"{r:.2f}")
-        plt.legend()
-        plt.show()
+                action = np.random.choice(actions, p=probs)
+                obs, rew, term, trunc, _ = env.step(action)
+
+                if term or trunc:
+                    obs, _ = env.reset()
+                    current_batch += 1
+
+                    if current_batch >= max_batch:
+                        break
+
+            # Perform training

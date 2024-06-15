@@ -7,14 +7,18 @@ perform mini batch average updates.
 """
 
 
-class Activation:
+class NameSpace:
     """
     This class is used strictly as a namespace
     """
 
-    def __new__(*args, **kwargs):
-        raise RuntimeError("Activations is not meant for instantiation")
+    def __new__(cls, *args, **kwargs):
+        raise RuntimeError(
+            f"{cls.__name__} is not meant for instantiation. It is used strictly as a namespace."
+        )
 
+
+class Activation(NameSpace):
     @classmethod
     def tanh(cls, x: np.ndarray, der: bool = False) -> np.ndarray:
         return 1 - np.power(np.tanh(x), 2) if der else np.tanh(x)
@@ -32,7 +36,15 @@ class Activation:
         return np.ones(x.shape) if der else x
 
 
+class Loss(NameSpace):
+
+    @classmethod
+    def single_return(cls, log_prob: float, der: bool = False):
+        pass
+
+
 Operator: TypeAlias = Callable[..., np.ndarray]
+GradSnapshot: TypeAlias = tuple[np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 def only_hidden_layer(func):
@@ -63,6 +75,7 @@ class Layer:
         self.next_layer = next_layer
         self.values = np.zeros(self.size)
         self.grad_values = np.zeros(self.size)
+        self.grad_snapshots: list[GradSnapshot] = []
 
     def connect_layer(self, next_layer: "Layer"):
         self.next_layer = next_layer
@@ -76,7 +89,7 @@ class Layer:
         self.activation = activation
 
         self.grad_w = np.zeros(self.weights.shape)
-        self.grad_b = np.zeros(self.size)
+        self.grad_b = np.zeros(self.bias.shape)
 
     @only_hidden_layer
     def propagate(self):
@@ -89,8 +102,14 @@ class Layer:
 
         # Compute and store all the local gradients
         grad_activation_result = self.activation(linear_result, der=True)
-        self.grad_values = np.matmul(self.weights.T, grad_activation_result)
-        self.grad_w = np.outer(grad_activation_result, self.values)
+        self.grad_values[:] = np.matmul(self.weights.T, grad_activation_result)[:]
+        self.grad_w[:] = np.outer(grad_activation_result, self.values)[:]
+        self.grad_b[:] = grad_activation_result[:]
+
+        # Store gradients of the current propagation routine
+        self.grad_snapshots.append(
+            (self.grad_values[:], self.grad_w[:], self.grad_b[:])
+        )
 
     def fill(self, values: np.ndarray):
         # Just copy the values into allocated array
@@ -108,6 +127,7 @@ class Layer:
 class NN:
     def __init__(self, arch: np.ndarray, activations: Optional[list[Operator]] = None):
         assert len(arch) > 1
+
         self.arch = arch
         self.layers: list[Layer] = [Layer(size) for size in arch]
         self.activations = activations or [Activation.tanh] * (len(self.layers) - 1)
@@ -146,7 +166,7 @@ class NN:
             in_layer.connect_layer(out_layer)
             in_layer.add_arch(weights=weights, bias=bias, activation=activation)
 
-    def forward(self, x: np.ndarray):
+    def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Performs a forward pass of the constructed neural network.
         """
@@ -154,3 +174,11 @@ class NN:
 
         for layer in self.hidden_layers:
             layer.propagate()
+
+        return self.output_layer.values
+
+    def backward(self):
+        """
+        Perform a backward propagtion of gradients.
+        """
+        pass
