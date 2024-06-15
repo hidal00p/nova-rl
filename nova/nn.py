@@ -17,24 +17,15 @@ class Activation:
 
     @classmethod
     def tanh(cls, x: np.ndarray, der: bool = False) -> np.ndarray:
-        if der:
-            return np.tanh(x)
-        else:
-            return 1 - np.power(np.tanh(x), 2)
+        return 1 - np.power(np.tanh(x), 2) if der else np.tanh(x)
 
     @classmethod
     def relu(cls, x: np.ndarray, der: bool = False) -> np.ndarray:
-        if der:
-            return np.array([])
-        else:
-            return np.array([])
+        return 1 * (x > 0) if der else x * (x > 0)
 
     @classmethod
     def softmax(cls, x: np.ndarray, der: bool = False) -> np.ndarray:
-        if der:
-            return np.array([])
-        else:
-            return np.array([])
+        raise NotImplementedError()
 
     @classmethod
     def identity(cls, x: np.ndarray, der=False) -> np.ndarray:
@@ -89,9 +80,6 @@ class Layer:
 
     @only_hidden_layer
     def propagate(self):
-        if self.next_layer is None:
-            return
-
         # Compute forward pass for the next layer
         linear_result = np.matmul(self.weights, self.values) + self.bias
         activation_result = self.activation(linear_result)
