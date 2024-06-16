@@ -1,5 +1,11 @@
 import numpy as np
-from nova.nn import Layer, Activation, NN
+from nova.nn import Layer, Activation, NN, Operator
+
+
+def backprop(layers: list[Layer], loss: Operator):
+    layers[-1].eval_grads(loss)
+    for layer in reversed(layers[:-1]):
+        layer.eval_grads()
 
 
 class TestLayer:
@@ -16,11 +22,17 @@ class TestLayer:
             activation=Activation.identity,
         )
 
+        layers = [input_layer, output_layer]
+
         for _ in range(5):
             input_values = np.random.rand(input_size)
             input_layer.fill(input_values)
             input_layer.propagate()
+
+            backprop(layers=layers, loss=Activation.identity)
             assert (input_values == input_layer.grad_w).all()
+
+            output_layer.clear(), input_layer.clear()
 
     def test_gradient_wrt_values(self):
         input_size, output_size = 3, 2
@@ -35,11 +47,14 @@ class TestLayer:
             activation=Activation.identity,
         )
 
+        layers = [input_layer, output_layer]
+
         input_values = np.ones(input_size)
         input_layer.fill(input_values)
         input_layer.propagate()
 
-        assert (input_layer.grad_values == np.array([5, 7, 9])).all()
+        backprop(layers=layers, loss=Activation.identity)
+        assert (input_layer.grad_snapshots[0] == np.array([5, 7, 9])).all()
 
 
 class TestNN:

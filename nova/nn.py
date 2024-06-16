@@ -6,6 +6,8 @@ My goal is to store gradients per pass, so that I could
 perform mini batch average updates.
 """
 
+Operator: TypeAlias = Callable[..., np.ndarray]
+
 
 class NameSpace:
     """
@@ -36,17 +38,6 @@ class Activation(NameSpace):
         return np.ones(x.shape) if der else x
 
 
-class Loss(NameSpace):
-
-    @classmethod
-    def single_return(cls, log_prob: float, der: bool = False):
-        pass
-
-
-Operator: TypeAlias = Callable[..., np.ndarray]
-GradSnapshot: TypeAlias = tuple[np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]
-
-
 def only_hidden_layer(func):
     def _func(self: "Layer", *args, **kwargs):
         assert (
@@ -74,8 +65,9 @@ class Layer:
         self.size = size
         self.next_layer = next_layer
         self.values = np.zeros(self.size)
-        self.grad_values = np.zeros(self.size)
-        self.grad_snapshots: list[GradSnapshot] = []
+
+        self.value_snapshots: list[np.ndarray] = []
+        self.grad_snapshots: list[np.ndarray] = []
 
     def connect_layer(self, next_layer: "Layer"):
         self.next_layer = next_layer
@@ -87,6 +79,7 @@ class Layer:
         )
         self.bias = bias
         self.activation = activation
+        self.activation_grad_snapshots: list[np.ndarray] = []
 
         self.grad_w = np.zeros(self.weights.shape)
         self.grad_b = np.zeros(self.bias.shape)
@@ -95,33 +88,57 @@ class Layer:
     def propagate(self):
         # Compute forward pass for the next layer
         linear_result = np.matmul(self.weights, self.values) + self.bias
-        activation_result = self.activation(linear_result)
 
         # Fill the next layer with the computation
-        self.next_layer.fill(activation_result)
+        self.next_layer.fill(self.activation(linear_result))
 
         # Compute and store all the local gradients
-        grad_activation_result = self.activation(linear_result, der=True)
-        self.grad_values[:] = np.matmul(self.weights.T, grad_activation_result)[:]
-        self.grad_w[:] = np.outer(grad_activation_result, self.values)[:]
-        self.grad_b[:] = grad_activation_result[:]
-
-        # Store gradients of the current propagation routine
-        self.grad_snapshots.append(
-            (self.grad_values[:], self.grad_w[:], self.grad_b[:])
-        )
+        activation_grad = self.activation(linear_result, der=True)
+        self.activation_grad_snapshots.append(activation_grad.copy())
 
     def fill(self, values: np.ndarray):
         # Just copy the values into allocated array
         self.values[:] = values[:]
+        self.value_snapshots.append(self.values.copy())
 
     def clear(self):
         self.values[:] = 0.0
-        self.grad_values[:] = 0.0
+        self.value_snapshots.clear()
+        self.grad_snapshots.clear()
 
         if self.next_layer is not None:
             self.grad_w[:] = 0.0
             self.grad_b[:] = 0.0
+            self.activation_grad_snapshots.clear()
+
+    def eval_grads(self, loss: Optional[Operator] = None):
+        """
+        For correct evaluation gradients have to be backward evaluated.
+        Hence, the gradients w.r.t to values must be available to the
+        current layer.
+        """
+        if self.next_layer is None:
+            assert loss is not None
+            # TODO: Can I vectorize this?
+            # Maybe by passing a full array into the loss function at ones
+            # it will be able to correctly compute losses per snapshot.
+            for values in self.value_snapshots:
+                self.grad_snapshots.append(loss(values, der=True))
+
+        else:
+            for values, activation_grad, loss_grad in zip(
+                self.value_snapshots,
+                self.activation_grad_snapshots,
+                self.next_layer.grad_snapshots,
+            ):
+                activation_grad = np.multiply(activation_grad, loss_grad)
+
+                self.grad_snapshots.append(np.matmul(self.weights.T, activation_grad))
+                self.grad_w += np.outer(activation_grad, self.values)
+                self.grad_b += activation_grad
+
+            self.grad_w /= len(self.value_snapshots)
+            self.grad_b /= len(self.value_snapshots)
 
 
 class NN:
@@ -166,6 +183,10 @@ class NN:
             in_layer.connect_layer(out_layer)
             in_layer.add_arch(weights=weights, bias=bias, activation=activation)
 
+    def clear(self):
+        for layer in self.layers:
+            layer.clear()
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Performs a forward pass of the constructed neural network.
@@ -177,8 +198,32 @@ class NN:
 
         return self.output_layer.values
 
-    def backward(self):
+    def backward(self, loss: Operator):
         """
         Perform a backward propagtion of gradients.
         """
-        pass
+        self.output_layer.eval_grads(loss)
+        for layer in reversed(self.hidden_layers):
+            layer.eval_grads()
+
+    @property
+    def params(self):
+        """
+        Let's construct a vector out of all neural net params.
+
+        TODO: this is not efficient, I would like to get rid of arrays completely.
+        """
+        return [layer.weights.ravel() for layer in self.hidden_layers] + [
+            layer.bias for layer in self.layers
+        ]
+
+    @property
+    def grads(self):
+        """
+        Let's construct a vector out of all grads, which were computed during the backward call.
+
+        TODO: this is not efficient, I would like to get rid of arrays completely.
+        """
+        return [layer.grad_w.ravel() for layer in self.hidden_layers] + [
+            layer.grad_b for layer in self.layers
+        ]
