@@ -36,8 +36,8 @@ class TestLunarLander:
                 if term or trunc:
                     obs, _ = env.reset()
                     current_batch += 1
-
+                    policy.clear()
                     if current_batch >= max_batch:
                         break
-
             # Perform training
+        pass
